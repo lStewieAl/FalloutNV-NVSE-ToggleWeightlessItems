@@ -18,8 +18,7 @@ bool hideWeightless = false;
 char nameFilter[256] = {'\0'};
 
 DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in containers", 0, 0, NULL)
-bool Cmd_TSW_Execute(COMMAND_ARGS)
-{
+bool Cmd_TSW_Execute(COMMAND_ARGS) {
 	hideWeightless = !hideWeightless;
 
 	if (hideWeightless) {
@@ -30,21 +29,20 @@ bool Cmd_TSW_Execute(COMMAND_ARGS)
 	}
 	*result = hideWeightless;
 	RefreshItemListBox();
+	
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(filter, "Toggles the visibility of specified items in containers", 0, 1, kParams_OneString)
-bool Cmd_filter_Execute(COMMAND_ARGS)
-{
+DEFINE_COMMAND_PLUGIN(Filter, "Disable visibility of specified items in containers", 0, 1, kParams_OneString)
+bool Cmd_Filter_Execute(COMMAND_ARGS) {
 	ExtractArgs(EXTRACT_ARGS, &nameFilter);
 	RefreshItemListBox();
-
+	
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(unfilter, "Toggles the visibility of specified items in containers", 0, 1, NULL)
-bool Cmd_unfilter_Execute(COMMAND_ARGS)
-{
+DEFINE_COMMAND_PLUGIN(UnFilter, "Remove filter applied with 'filter' command", 0, 1, NULL)
+bool Cmd_UnFilter_Execute(COMMAND_ARGS) {
 	nameFilter[0] = '\0';
 	RefreshItemListBox();
 	return true;
@@ -70,8 +68,8 @@ extern "C" {
 		// register commands
 		nvse->SetOpcodeBase(0x2000);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
-		nvse->RegisterCommand(&kCommandInfo_filter);
-		nvse->RegisterCommand(&kCommandInfo_unfilter);
+		nvse->RegisterCommand(&kCommandInfo_Filter);
+		nvse->RegisterCommand(&kCommandInfo_UnFilter);
 
 		return true;
 	}
@@ -101,22 +99,13 @@ __declspec(naked) void hookIsWeightless() {
 
 bool shouldHideItem(TESForm* form) {
 	if (!form) return false;
-	bool result = false;
-	
-	if (hideWeightless) {
-		result = getItemWeight(form) <= 0;
-	}
-	if (nameFilter[0]) {
-		result = result || !getItemName(form).Includes(nameFilter);
-	}
-	return result;
+	return (hideweightless && getItemWeight(form) <= 0) || (nameFilter[0] && !getItemName(form).Includes(nameFilter));
 }
 
 int getItemWeight(TESForm* form) {
 	int weight = -1;
 	TESWeightForm* weightForm = DYNAMIC_CAST(form, TESForm, TESWeightForm);
-	if (weightForm)
-	{
+	if (weightForm) {
 		weight = (int) weightForm->weight;
 	}
 	else {
