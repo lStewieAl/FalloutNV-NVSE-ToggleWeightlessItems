@@ -2,17 +2,20 @@
 #include "nvse/nvse/nvse_version.h"
 #include "nvse/nvse/SafeWrite.h"
 #include "nvse/nvse/GameRTTI.h"
+#include "nvse/nvse/ParamInfos.h"
 
 bool versionCheck(const NVSEInterface* nvse);
 
 bool shouldHideItem(TESForm* form);
-int getWeight(TESForm* form);
-void injectShouldShowItemHooks();
+int getItemWeight(TESForm* form);
+void injectQuestItemJMP();
 void hookIsWeightless();
 void(*RefreshItemListBox)(void) = (void(*)(void))0x704AF0;
+String getItemName(TESForm* form);
 
 
-static bool hideWeightless = false;
+bool hideWeightless = false;
+char nameFilter[256] = {'\0'};
 
 DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in containers", 0, 0, NULL)
 bool Cmd_TSW_Execute(COMMAND_ARGS)
@@ -26,6 +29,23 @@ bool Cmd_TSW_Execute(COMMAND_ARGS)
 		Console_Print("Weightless items shown.");
 	}
 	*result = hideWeightless;
+	RefreshItemListBox();
+	return true;
+}
+
+DEFINE_COMMAND_PLUGIN(filter, "Toggles the visibility of specified items in containers", 0, 1, kParams_OneString)
+bool Cmd_filter_Execute(COMMAND_ARGS)
+{
+	ExtractArgs(EXTRACT_ARGS, &nameFilter);
+	RefreshItemListBox();
+
+	return true;
+}
+
+DEFINE_COMMAND_PLUGIN(unfilter, "Toggles the visibility of specified items in containers", 0, 1, NULL)
+bool Cmd_unfilter_Execute(COMMAND_ARGS)
+{
+	nameFilter[0] = '\0';
 	RefreshItemListBox();
 	return true;
 }
@@ -45,18 +65,20 @@ extern "C" {
 	}
 
 	bool NVSEPlugin_Load(const NVSEInterface *nvse) {
-		injectShouldShowItemHooks();
+		injectQuestItemJMP();
 
 		// register commands
 		nvse->SetOpcodeBase(0x2000);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
+		nvse->RegisterCommand(&kCommandInfo_filter);
+		nvse->RegisterCommand(&kCommandInfo_unfilter);
 
 		return true;
 	}
 
 };
 
-void injectShouldShowItemHooks() {
+void injectQuestItemJMP() {
     /* add push eax (which will contain the items base address) and shift the proceeding code down one (to occupy the NOP) */
 	SafeWriteBuf(0x75E662, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
 	WriteRelJump(0x75E89F, (UInt32)hookIsWeightless);
@@ -64,7 +86,7 @@ void injectShouldShowItemHooks() {
 
 __declspec(naked) void hookIsWeightless() {
 	_asm {
-		cmp al, 1 // if al is already 1, the item should be hidden, so don't bother checking its weight
+		cmp al, 1 // if al is 1, the item should be hidden, so don't bother checking its weight
 		je leaveFunction
 
 		mov eax, [ebp-0x38] // eax <- item base address
@@ -78,11 +100,19 @@ __declspec(naked) void hookIsWeightless() {
 }
 
 bool shouldHideItem(TESForm* form) {
-	if (hideWeightless && form) return getWeight(form) <= 0;
-	return false;
+	if (!form) return false;
+	bool result = false;
+	
+	if (hideWeightless) {
+		result = getItemWeight(form) <= 0;
+	}
+	if (nameFilter[0]) {
+		result = result || !getItemName(form).Includes(nameFilter);
+	}
+	return result;
 }
 
-int getWeight(TESForm* form) {
+int getItemWeight(TESForm* form) {
 	int weight = -1;
 	TESWeightForm* weightForm = DYNAMIC_CAST(form, TESForm, TESWeightForm);
 	if (weightForm)
@@ -96,6 +126,11 @@ int getWeight(TESForm* form) {
 		}
 	}
 	return weight;
+}
+
+String getItemName(TESForm* form) {
+	TESFullName* first = DYNAMIC_CAST(form, TESForm, TESFullName);
+	return first->name;
 }
 
 
