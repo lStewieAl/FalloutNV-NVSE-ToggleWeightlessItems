@@ -63,7 +63,7 @@ extern "C" {
 	}
 
 	bool NVSEPlugin_Load(const NVSEInterface *nvse) {
-		injectQuestItemJMP();
+		if(!(nvse->isEditor)) injectQuestItemJMP();
 
 		// register commands
 		nvse->SetOpcodeBase(0x2000);
@@ -125,7 +125,6 @@ String getItemName(TESForm* form) {
 
 
 bool versionCheck(const NVSEInterface* nvse) {
-	if (nvse->isEditor) return false;
 	if (nvse->nvseVersion < NVSE_VERSION_INTEGER) {
 		_ERROR("NVSE version too old (got %08X expected at least %08X)", nvse->nvseVersion, NVSE_VERSION_INTEGER);
 		return false;
