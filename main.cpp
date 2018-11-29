@@ -7,18 +7,25 @@
 bool versionCheck(const NVSEInterface* nvse);
 
 bool shouldHideItem(TESForm* form);
-int getItemWeight(TESForm* form);
+float getItemWeight(TESForm* form);
 void injectQuestItemJMP();
 void hookIsWeightless();
-void(*RefreshItemListBox)(void) = (void(*)(void))0x704AF0;
 String getItemName(TESForm* form);
 
+/* Credits to JazzIsParis */
+void(*RefreshItemListBox)(void) = (void(*)(void))0x704AF0;
+ParamInfo kParams_JIP_OneOptionalString[] =
+{
+	{ "String", kParamType_String, 1 }
+};
+#define NUM_ARGS *((UInt8*)scriptData + *opcodeOffsetPtr)
 
 bool hideWeightless = false;
 char nameFilter[256] = {'\0'};
 
 DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in containers", 0, 0, NULL)
-bool Cmd_TSW_Execute(COMMAND_ARGS) {
+bool Cmd_TSW_Execute(COMMAND_ARGS)
+{
 	hideWeightless = !hideWeightless;
 
 	if (hideWeightless) {
@@ -29,20 +36,22 @@ bool Cmd_TSW_Execute(COMMAND_ARGS) {
 	}
 	*result = hideWeightless;
 	RefreshItemListBox();
-	
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(Filter, "Disable visibility of specified items in containers", 0, 1, kParams_OneString)
-bool Cmd_Filter_Execute(COMMAND_ARGS) {
-	ExtractArgs(EXTRACT_ARGS, &nameFilter);
+DEFINE_COMMAND_PLUGIN(filter, "Toggles the visibility of specified items in containers", 0, 1, kParams_JIP_OneOptionalString)
+bool Cmd_filter_Execute(COMMAND_ARGS)
+{
+	UInt8 numArgs = NUM_ARGS;
+	if(!ExtractArgs(EXTRACT_ARGS, &nameFilter) || numArgs == 0) nameFilter[0]='\0';
 	RefreshItemListBox();
-	
+
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(UnFilter, "Remove filter applied with 'filter' command", 0, 1, NULL)
-bool Cmd_UnFilter_Execute(COMMAND_ARGS) {
+DEFINE_COMMAND_PLUGIN(unfilter, "Toggles the visibility of specified items in containers", 0, 0, NULL)
+bool Cmd_unfilter_Execute(COMMAND_ARGS)
+{
 	nameFilter[0] = '\0';
 	RefreshItemListBox();
 	return true;
@@ -63,13 +72,13 @@ extern "C" {
 	}
 
 	bool NVSEPlugin_Load(const NVSEInterface *nvse) {
-		if(!(nvse->isEditor)) injectQuestItemJMP();
+		if (!(nvse->isEditor)) injectQuestItemJMP();
 
 		// register commands
 		nvse->SetOpcodeBase(0x2000);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
-		nvse->RegisterCommand(&kCommandInfo_Filter);
-		nvse->RegisterCommand(&kCommandInfo_UnFilter);
+		nvse->RegisterCommand(&kCommandInfo_filter);
+		nvse->RegisterCommand(&kCommandInfo_unfilter);
 
 		return true;
 	}
@@ -99,19 +108,28 @@ __declspec(naked) void hookIsWeightless() {
 
 bool shouldHideItem(TESForm* form) {
 	if (!form) return false;
-	return (hideweightless && getItemWeight(form) <= 0) || (nameFilter[0] && !getItemName(form).Includes(nameFilter));
+	bool result = false;
+	
+	if (hideWeightless) {
+		result = getItemWeight(form) <= 0;
+	}
+	if (nameFilter[0]) {
+		result = result || !getItemName(form).Includes(nameFilter);
+	}
+	return result;
 }
 
-int getItemWeight(TESForm* form) {
-	int weight = -1;
+float getItemWeight(TESForm* form) {
+	float weight = -1;
 	TESWeightForm* weightForm = DYNAMIC_CAST(form, TESForm, TESWeightForm);
-	if (weightForm) {
-		weight = (int) weightForm->weight;
+	if (weightForm)
+	{
+		weight = weightForm->weight;
 	}
 	else {
 		TESAmmo* pAmmo = DYNAMIC_CAST(form, TESForm, TESAmmo);
 		if (pAmmo) {
-			weight = (int) pAmmo->weight;
+			weight = pAmmo->weight;
 		}
 	}
 	return weight;
