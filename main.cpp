@@ -75,7 +75,7 @@ extern "C" {
 		if (!(nvse->isEditor)) injectQuestItemJMP();
 
 		// register commands
-		nvse->SetOpcodeBase(0x2000);
+		nvse->SetOpcodeBase(0x2130);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
 		nvse->RegisterCommand(&kCommandInfo_filter);
 		nvse->RegisterCommand(&kCommandInfo_unfilter);
