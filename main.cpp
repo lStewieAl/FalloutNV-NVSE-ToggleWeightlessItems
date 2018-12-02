@@ -90,13 +90,14 @@ extern "C" {
 void injectQuestItemJMP() {
 	/* add push eax (which will contain the items base address) and shift the proceeding code down one (to occupy the NOP) */
 	SafeWriteBuf(0x75E662, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
-	WriteRelJump(0x75E89F, (UInt32)hookIsWeightless);
+	WriteRelJump(0x75E89C, (UInt32)hookIsWeightless);
 }
 
 __declspec(naked) void hookIsWeightless() {
 	_asm {
-		cmp al, 1 // if al is 1, the item should be hidden, so don't bother checking its weight
-		je leaveFunction
+		mov al, [ebp-01]
+		test al, al // if al is 1, the item should be hidden, so don't bother checking its weight
+		jnz leaveFunction
 
 		mov eax, [ebp - 0x38] // eax <- item base address
 		call shouldHideItem
