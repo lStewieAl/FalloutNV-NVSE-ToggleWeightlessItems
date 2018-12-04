@@ -9,6 +9,8 @@ bool versionCheck(const NVSEInterface* nvse);
 bool shouldHideItem(TESForm* form);
 void injectQuestItemJMP();
 void hookIsWeightless();
+void hookPipboy();
+void hookCrafting();
 
 String getItemName(TESForm* form);
 
@@ -37,7 +39,6 @@ bool Cmd_TSW_Execute(COMMAND_ARGS)
 		Console_Print("Weightless items shown.");
 	}
 	*result = hideWeightless;
-	RefreshItemListBox();
 	return true;
 }
 
@@ -46,7 +47,6 @@ bool Cmd_filter_Execute(COMMAND_ARGS)
 {
 	UInt8 numArgs = NUM_ARGS;
 	if (!ExtractArgs(EXTRACT_ARGS, &nameFilter) || numArgs == 0) nameFilter[0] = '\0';
-	RefreshItemListBox();
 
 	return true;
 }
@@ -55,7 +55,7 @@ DEFINE_COMMAND_PLUGIN(unfilter, "Remove all filters", 0, 0, NULL)
 bool Cmd_unfilter_Execute(COMMAND_ARGS)
 {
 	nameFilter[0] = '\0';
-	RefreshItemListBox();
+	hideWeightless = false;
 	return true;
 }
 
@@ -88,9 +88,22 @@ extern "C" {
 };
 
 void injectQuestItemJMP() {
+
+	/* container hook */
 	/* add push eax (which will contain the items base address) and shift the proceeding code down one (to occupy the NOP) */
 	SafeWriteBuf(0x75E662, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
 	WriteRelJump(0x75E89C, (UInt32)hookIsWeightless);
+
+	/* barter hook */
+	SafeWriteBuf(0x7304C2, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
+	WriteRelJump(0x73066E, (UInt32)hookIsWeightless);
+
+	/* crafting/recipe hook */
+	WriteRelJump(0x728D99, (UInt32)hookCrafting);
+
+	/* pipboy hook */
+	WriteRelJump(0x7827F1, (UInt32)hookPipboy);
+
 }
 
 __declspec(naked) void hookIsWeightless() {
@@ -106,6 +119,46 @@ __declspec(naked) void hookIsWeightless() {
 		mov esp, ebp
 			pop ebp
 			ret
+	}
+}
+
+_declspec(naked) void hookPipboy() {
+	static const UInt32 retnAddr = 0x782641;
+	_asm {
+		test al, al
+		jnz leaveFunction
+		
+		mov ecx, [ebp + 8]
+		mov ecx, [ecx + 8]
+		push ecx
+		call shouldHideItem
+		add esp, 4
+
+		jnz leaveFunction
+		jmp retnAddr
+
+
+	leaveFunction:
+		mov esp, ebp
+		pop ebp
+		ret
+	}
+}
+
+__declspec(naked) void hookCrafting() {
+	_asm {
+		test al, al // if al is 1, the item should be hidden, so don't bother checking its weight
+		jnz leaveFunction
+		mov eax, [ebp + 8]
+		push eax
+		call shouldHideItem
+		add esp, 4
+
+	leaveFunction:
+		
+		pop esi
+		pop ebp
+		ret
 	}
 }
 
@@ -125,7 +178,6 @@ String getItemName(TESForm* form) {
 	TESFullName* first = DYNAMIC_CAST(form, TESForm, TESFullName);
 	return first->name;
 }
-
 
 
 bool versionCheck(const NVSEInterface* nvse) {
