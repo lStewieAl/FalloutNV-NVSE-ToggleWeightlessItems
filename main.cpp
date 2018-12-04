@@ -6,11 +6,10 @@
 
 bool versionCheck(const NVSEInterface* nvse);
 
-bool shouldHideItem(TESForm* form);
-void injectQuestItemJMP();
-void hookIsWeightless();
-void hookPipboy();
+bool __fastcall shouldHideItem(TESForm* form);
+void injectHooks();
 void hookCrafting();
+void hookContainer();
 
 String getItemName(TESForm* form);
 
@@ -31,13 +30,8 @@ DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in contai
 bool Cmd_TSW_Execute(COMMAND_ARGS)
 {
 	hideWeightless = !hideWeightless;
+	if (IsConsoleMode) Console_Print("Weightless items: %s", hideWeightless? "shown." : "hidden.");
 
-	if (hideWeightless) {
-		Console_Print("Weightless items hidden.");
-	}
-	else {
-		Console_Print("Weightless items shown.");
-	}
 	*result = hideWeightless;
 	return true;
 }
@@ -59,6 +53,16 @@ bool Cmd_unfilter_Execute(COMMAND_ARGS)
 	return true;
 }
 
+DEFINE_COMMAND_PLUGIN(isFiltered, "Check whether a filter is active", 0, 0, NULL)
+bool Cmd_isFiltered_Execute(COMMAND_ARGS)
+{
+	bool isFilter = nameFilter[0] != '\0' || hideWeightless;
+	if (IsConsoleMode) Console_Print("IsFiltered: %s", isFilter?"true":"false");
+	*result = isFilter;
+	return true;
+	
+}
+
 extern "C" {
 
 	BOOL WINAPI DllMain(HANDLE hDllHandle, DWORD dwReason, LPVOID lpreserved) {
@@ -74,95 +78,63 @@ extern "C" {
 	}
 
 	bool NVSEPlugin_Load(const NVSEInterface *nvse) {
-		if (!(nvse->isEditor)) injectQuestItemJMP();
+		if (!(nvse->isEditor)) injectHooks();
 
 		// register commands
 		nvse->SetOpcodeBase(0x2130);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
 		nvse->RegisterCommand(&kCommandInfo_filter);
 		nvse->RegisterCommand(&kCommandInfo_unfilter);
+		nvse->RegisterCommand(&kCommandInfo_isFiltered);
 
 		return true;
 	}
 
 };
 
-void injectQuestItemJMP() {
-
-	/* container hook */
-	/* add push eax (which will contain the items base address) and shift the proceeding code down one (to occupy the NOP) */
-	SafeWriteBuf(0x75E662, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
-	WriteRelJump(0x75E89C, (UInt32)hookIsWeightless);
-
-	/* barter hook */
-	SafeWriteBuf(0x7304C2, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
-	WriteRelJump(0x73066E, (UInt32)hookIsWeightless);
+void injectHooks() {
 
 	/* crafting/recipe hook */
 	WriteRelJump(0x728D99, (UInt32)hookCrafting);
 
-	/* pipboy hook */
-	WriteRelJump(0x7827F1, (UInt32)hookPipboy);
+	/* general inventory hook (container, pipboy, barter) */
+	WriteRelJump(0x730C8F, (UInt32)hookContainer);
+	SafeWriteBuf(0x730C94, "\x90", 1);
 
 }
 
-__declspec(naked) void hookIsWeightless() {
+_declspec(naked) void hookContainer() {
+	static const UInt32 retnAddr = 0x730C95;
 	_asm {
-		mov al, [ebp-01]
-		test al, al // if al is 1, the item should be hidden, so don't bother checking its weight
-		jnz leaveFunction
-
-		mov eax, [ebp - 0x38] // eax <- item base address
-		call shouldHideItem
-
-		leaveFunction :
-		mov esp, ebp
-			pop ebp
-			ret
-	}
-}
-
-_declspec(naked) void hookPipboy() {
-	static const UInt32 retnAddr = 0x782641;
-	_asm {
+		pop ecx
 		test al, al
-		jnz leaveFunction
-		
-		mov ecx, [ebp + 8]
-		mov ecx, [ecx + 8]
-		push ecx
+		jnz skipCheck
+
+		mov ecx, [ecx+8]
 		call shouldHideItem
-		add esp, 4
-
-		jnz leaveFunction
+		
+	skipCheck :
+		movzx eax, al
 		jmp retnAddr
-
-
-	leaveFunction:
-		mov esp, ebp
-		pop ebp
-		ret
 	}
 }
+
 
 __declspec(naked) void hookCrafting() {
 	_asm {
-		test al, al // if al is 1, the item should be hidden, so don't bother checking its weight
+		test al, al // if al is already 1, the item should be hidden, so don't bother checking whether it should be hidden
 		jnz leaveFunction
-		mov eax, [ebp + 8]
-		push eax
+		mov ecx, [ebp + 8]
 		call shouldHideItem
-		add esp, 4
 
-	leaveFunction:
-		
+	leaveFunction:	
 		pop esi
 		pop ebp
 		ret
 	}
 }
 
-bool shouldHideItem(TESForm* form) {
+bool __fastcall shouldHideItem(TESForm* form) {
 	if (!form) return false;
 
 	if (hideWeightless && GetItemWeight(form, false) <= 0) {
