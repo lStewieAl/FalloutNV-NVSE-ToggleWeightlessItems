@@ -6,55 +6,61 @@
 
 bool versionCheck(const NVSEInterface* nvse);
 
-bool shouldHideItem(TESForm* form);
-float getItemWeight(TESForm* form);
-void injectQuestItemJMP();
-void hookIsWeightless();
+bool __fastcall shouldHideItem(TESForm* form);
+void injectHooks();
+void hookCrafting();
+void hookContainer();
+
 String getItemName(TESForm* form);
 
 /* Credits to JazzIsParis */
 void(*RefreshItemListBox)(void) = (void(*)(void))0x704AF0;
+float(*GetItemWeight)(TESForm *baseItem, bool isHardcore) = (float(*)(TESForm*, bool))0x48EBC0;
 ParamInfo kParams_JIP_OneOptionalString[] =
 {
 	{ "String", kParamType_String, 1 }
 };
 #define NUM_ARGS *((UInt8*)scriptData + *opcodeOffsetPtr)
 
+
 bool hideWeightless = false;
-char nameFilter[256] = {'\0'};
+char nameFilter[256] = { '\0' };
 
 DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in containers", 0, 0, NULL)
 bool Cmd_TSW_Execute(COMMAND_ARGS)
 {
 	hideWeightless = !hideWeightless;
+	if (IsConsoleMode) Console_Print("Weightless items: %s", hideWeightless? "shown." : "hidden.");
 
-	if (hideWeightless) {
-		Console_Print("Weightless items hidden.");
-	}
-	else {
-		Console_Print("Weightless items shown.");
-	}
 	*result = hideWeightless;
-	RefreshItemListBox();
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(filter, "Toggles the visibility of specified items in containers", 0, 1, kParams_JIP_OneOptionalString)
+DEFINE_COMMAND_PLUGIN(filter, "Filter items from a container", 0, 1, kParams_JIP_OneOptionalString)
 bool Cmd_filter_Execute(COMMAND_ARGS)
 {
 	UInt8 numArgs = NUM_ARGS;
-	if(!ExtractArgs(EXTRACT_ARGS, &nameFilter) || numArgs == 0) nameFilter[0]='\0';
-	RefreshItemListBox();
+	if (!ExtractArgs(EXTRACT_ARGS, &nameFilter) || numArgs == 0) nameFilter[0] = '\0';
 
 	return true;
 }
 
-DEFINE_COMMAND_PLUGIN(unfilter, "Toggles the visibility of specified items in containers", 0, 0, NULL)
+DEFINE_COMMAND_PLUGIN(unfilter, "Remove all filters", 0, 0, NULL)
 bool Cmd_unfilter_Execute(COMMAND_ARGS)
 {
 	nameFilter[0] = '\0';
-	RefreshItemListBox();
+	hideWeightless = false;
 	return true;
+}
+
+DEFINE_COMMAND_PLUGIN(isFiltered, "Check whether a filter is active", 0, 0, NULL)
+bool Cmd_isFiltered_Execute(COMMAND_ARGS)
+{
+	bool isFilter = nameFilter[0] != '\0' || hideWeightless;
+	if (IsConsoleMode) Console_Print("IsFiltered: %s", isFilter?"true":"false");
+	*result = isFilter;
+	return true;
+	
 }
 
 extern "C" {
@@ -66,80 +72,84 @@ extern "C" {
 	bool NVSEPlugin_Query(const NVSEInterface *nvse, PluginInfo *info) {
 		/* fill out the info structure */
 		info->infoVersion = PluginInfo::kInfoVersion;
-		info->name = "Toggle Weightless Items in Containers";
+		info->name = "Inventory Filter";
 		info->version = 1;
 		return versionCheck(nvse);
 	}
 
 	bool NVSEPlugin_Load(const NVSEInterface *nvse) {
-		if (!(nvse->isEditor)) injectQuestItemJMP();
+		if (!(nvse->isEditor)) injectHooks();
 
 		// register commands
 		nvse->SetOpcodeBase(0x2130);
 		nvse->RegisterCommand(&kCommandInfo_TSW);
 		nvse->RegisterCommand(&kCommandInfo_filter);
 		nvse->RegisterCommand(&kCommandInfo_unfilter);
+		nvse->RegisterCommand(&kCommandInfo_isFiltered);
 
 		return true;
 	}
 
 };
 
-void injectQuestItemJMP() {
-    /* add push eax (which will contain the items base address) and shift the proceeding code down one (to occupy the NOP) */
-	SafeWriteBuf(0x75E662, "\x50\x8B\xC8\x0F\xB6\x41\x04", 7);
-	WriteRelJump(0x75E89F, (UInt32)hookIsWeightless);
+void injectHooks() {
+
+	/* crafting/recipe hook */
+	WriteRelJump(0x728D99, (UInt32)hookCrafting);
+
+	/* general inventory hook (container, pipboy, barter) */
+	WriteRelJump(0x730C8F, (UInt32)hookContainer);
+	SafeWriteBuf(0x730C94, "\x90", 1);
+
 }
 
-__declspec(naked) void hookIsWeightless() {
+_declspec(naked) void hookContainer() {
+	static const UInt32 retnAddr = 0x730C95;
 	_asm {
-		cmp al, 1 // if al is 1, the item should be hidden, so don't bother checking its weight
-		je leaveFunction
+		pop ecx
+		test al, al
+		jnz skipCheck
 
-		mov eax, [ebp-0x38] // eax <- item base address
+		mov ecx, [ecx+8]
+		call shouldHideItem
+		
+	skipCheck :
+		movzx eax, al
+		jmp retnAddr
+	}
+}
+
+
+__declspec(naked) void hookCrafting() {
+	_asm {
+		test al, al // if al is already 1, the item should be hidden, so don't bother checking whether it should be hidden
+		jnz leaveFunction
+		mov ecx, [ebp + 8]
 		call shouldHideItem
 
-		leaveFunction:
-		mov esp,ebp
+	leaveFunction:	
+		pop esi
 		pop ebp
 		ret
 	}
 }
 
-bool shouldHideItem(TESForm* form) {
+bool __fastcall shouldHideItem(TESForm* form) {
 	if (!form) return false;
-	bool result = false;
-	
-	if (hideWeightless) {
-		result = getItemWeight(form) <= 0;
-	}
-	if (nameFilter[0]) {
-		result = result || !getItemName(form).Includes(nameFilter);
-	}
-	return result;
-}
 
-float getItemWeight(TESForm* form) {
-	float weight = -1;
-	TESWeightForm* weightForm = DYNAMIC_CAST(form, TESForm, TESWeightForm);
-	if (weightForm)
-	{
-		weight = weightForm->weight;
+	if (hideWeightless && GetItemWeight(form, false) <= 0) {
+		return true;
 	}
-	else {
-		TESAmmo* pAmmo = DYNAMIC_CAST(form, TESForm, TESAmmo);
-		if (pAmmo) {
-			weight = pAmmo->weight;
-		}
+	if (nameFilter[0] && !getItemName(form).Includes(nameFilter)) {
+		return true;
 	}
-	return weight;
+	return false;
 }
 
 String getItemName(TESForm* form) {
 	TESFullName* first = DYNAMIC_CAST(form, TESForm, TESFullName);
 	return first->name;
 }
-
 
 
 bool versionCheck(const NVSEInterface* nvse) {
