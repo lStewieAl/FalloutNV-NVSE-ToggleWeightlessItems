@@ -10,6 +10,7 @@ bool __fastcall shouldHideItem(TESForm* form);
 void injectHooks();
 void hookCrafting();
 void hookContainer();
+float getValuePerWeight(TESForm* form);
 
 String getItemName(TESForm* form);
 
@@ -22,9 +23,17 @@ ParamInfo kParams_JIP_OneOptionalString[] =
 };
 #define NUM_ARGS *((UInt8*)scriptData + *opcodeOffsetPtr)
 
+UInt32 GetItemValue(TESForm* form)
+{
+	if (form->typeID == kFormType_AlchemyItem) return ((AlchemyItem*)form)->value;
+	TESValueForm *valForm = DYNAMIC_CAST(form, TESForm, TESValueForm);
+	return valForm ? valForm->value : 0;
+}
+
 
 bool hideWeightless = false;
 char nameFilter[256] = { '\0' };
+int hideItemValue = 0;
 
 DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in containers", 0, 0, NULL)
 bool Cmd_TSW_Execute(COMMAND_ARGS)
@@ -33,6 +42,7 @@ bool Cmd_TSW_Execute(COMMAND_ARGS)
 	if (IsConsoleMode) Console_Print("Weightless items: %s", hideWeightless? "shown." : "hidden.");
 
 	*result = hideWeightless;
+	RefreshItemListBox();
 	return true;
 }
 
@@ -45,11 +55,20 @@ bool Cmd_filter_Execute(COMMAND_ARGS)
 	return true;
 }
 
+DEFINE_COMMAND_PLUGIN(filterval, "Filter based on value/weight", 0, 1, kParams_OneOptionalInt)
+bool Cmd_filterval_Execute(COMMAND_ARGS)
+{
+	UInt8 numArgs = NUM_ARGS;
+	if (!ExtractArgs(EXTRACT_ARGS, &hideItemValue) || numArgs == 0) hideItemValue = 0;
+	return true;
+}
+
 DEFINE_COMMAND_PLUGIN(unfilter, "Remove all filters", 0, 0, NULL)
 bool Cmd_unfilter_Execute(COMMAND_ARGS)
 {
 	nameFilter[0] = '\0';
 	hideWeightless = false;
+	hideItemValue = 0;
 	return true;
 }
 
@@ -59,8 +78,7 @@ bool Cmd_isFiltered_Execute(COMMAND_ARGS)
 	bool isFilter = nameFilter[0] != '\0' || hideWeightless;
 	if (IsConsoleMode) Console_Print("IsFiltered: %s", isFilter?"true":"false");
 	*result = isFilter;
-	return true;
-	
+	return true;	
 }
 
 extern "C" {
@@ -86,6 +104,7 @@ extern "C" {
 		nvse->RegisterCommand(&kCommandInfo_filter);
 		nvse->RegisterCommand(&kCommandInfo_unfilter);
 		nvse->RegisterCommand(&kCommandInfo_isFiltered);
+		nvse->RegisterCommand(&kCommandInfo_filterval);
 
 		return true;
 	}
@@ -99,7 +118,7 @@ void injectHooks() {
 
 	/* general inventory hook (container, pipboy, barter) */
 	WriteRelJump(0x730C8F, (UInt32)hookContainer);
-	SafeWriteBuf(0x730C94, "\x90", 1);
+	SafeWrite8(0x730C94, 0x90);
 
 }
 
@@ -137,6 +156,8 @@ __declspec(naked) void hookCrafting() {
 bool __fastcall shouldHideItem(TESForm* form) {
 	if (!form) return false;
 
+	if (hideItemValue && (getValuePerWeight(form) < hideItemValue)) return true;
+
 	if (hideWeightless && GetItemWeight(form, false) <= 0) {
 		return true;
 	}
@@ -144,6 +165,11 @@ bool __fastcall shouldHideItem(TESForm* form) {
 		return true;
 	}
 	return false;
+}
+
+float getValuePerWeight(TESForm* form) {
+	float weight = GetItemWeight(form, false);
+	return weight ? (float) GetItemValue(form) / weight : INT_MAX;
 }
 
 String getItemName(TESForm* form) {
