@@ -39,7 +39,7 @@ DEFINE_COMMAND_PLUGIN(TSW, "Toggles the visibility of weightless items in contai
 bool Cmd_TSW_Execute(COMMAND_ARGS)
 {
 	hideWeightless = !hideWeightless;
-	if (IsConsoleMode) Console_Print("Weightless items: %s", hideWeightless? "shown." : "hidden.");
+	if (IsConsoleMode) Console_Print("Weightless items: %s", hideWeightless ? "hidden.":"shown.");
 
 	*result = hideWeightless;
 	RefreshItemListBox();
@@ -76,7 +76,7 @@ DEFINE_COMMAND_PLUGIN(isFiltered, "Check whether a filter is active", 0, 0, NULL
 bool Cmd_isFiltered_Execute(COMMAND_ARGS)
 {
 	bool isFilter = nameFilter[0] != '\0' || hideWeightless;
-	if (IsConsoleMode) Console_Print("IsFiltered: %s", isFilter?"true":"false");
+	if (IsConsoleMode) Console_Print("IsFiltered: %s", isFilter ? "true":"false");
 	*result = isFilter;
 	return true;	
 }
